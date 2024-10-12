@@ -1,0 +1,61 @@
+---
+- name: rhel 9 patching testing
+  hosts: "{{ groups['redhat9'] }}"
+  vars:
+    rh_advisory: all
+    rh_advisories: ''
+    rh_cves: ''
+    packages: ''
+
+
+  tasks:
+    - block:
+        - name: check if the system needs to do patching or not
+          ansible.builtin.command:
+            cmd: dnf check-update
+          register: patching
+          failed_when: patching.rc != 0 and patching.rc != 100
+
+        - name: update all advisories - {{ rh_advisory }}
+          ansible.builtin.shell: "env dnf update --{{ rh_advisory }} -y"
+          when: rh_advisory is defined and patching.rc != 0
+
+        - name: update advisories
+          ansible.builtin.shell: "env dnf update --advisory={{ rh_advisories }} -y"
+          when: rh_advisories != '' and patching.rc != 0
+
+        - name: update cve
+          ansible.builtin.shell: "dnf update --cve={{ rh_cves }} -y"
+          when: rh_cves != '' and patching.rc != 0
+
+        - name: update packages for RHEL
+          ansible.builtin.dnf:
+            name: "{{ packages.split('\n') }}"
+            state: latest
+            update_cache: yes
+          when: packages != ''
+      when: ansible_facts['distribution'] == 'RedHat'
+
+    - block:
+        - name: update dnf-utils
+          ansible.builtin.dnf:
+            name: dnf-utils
+            state: latest
+
+        - name: check if a reboot required for RHEL
+          ansible.builtin.command: needs-restarting -r
+          register: result
+          failed_when: false
+
+        - name: display result
+          ansible.builtin.debug:
+            msg: "System reboot is required!"
+          when: result.rc == 1
+          changed_when: result.rc == 1
+      when: ansible_facts['distribution'] == 'RedHat'
+
+    - block:
+        - name: Reboot the server
+          ansible.builtin.reboot:
+          when: result.rc == 1
+      when: ansible_facts['distribution'] == 'RedHat' 
